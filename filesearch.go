@@ -24,6 +24,7 @@ var out = colorable.NewColorableStdout()
 
 type fileSearcher struct {
 	parallelWorkers int
+	caseSensitive   bool
 }
 
 type lineData struct {
@@ -37,6 +38,11 @@ func (fs *fileSearcher) Search(fileName, pattern string) {
 		panic(err)
 	}
 	defer f.Close()
+
+	if !fs.caseSensitive {
+		pattern = strings.ToLower(pattern)
+	}
+
 	if fs.parallelWorkers <= 1 {
 		fs.SearchSequential(f, pattern)
 	} else {
@@ -126,7 +132,13 @@ func (fs *fileSearcher) outputWriter(parsedLines <-chan lineData) <-chan error {
 // parseLine looks recursively through a line to find every instance of the pattern in the line
 func (fs *fileSearcher) parseLine(s, pattern string) (string, bool) {
 	var parsedString string
-	i := strings.Index(s, pattern)
+	var compareString string
+	if fs.caseSensitive {
+		compareString = s
+	} else {
+		compareString = strings.ToLower(s)
+	}
+	i := strings.Index(compareString, pattern)
 	if i > -1 {
 		pLength := len(pattern)
 		sString := s[0:i]
@@ -155,7 +167,9 @@ func main() {
 	}
 
 	var numWorkers int
+	var caseSensitive bool
 	flag.IntVar(&numWorkers, "p", 4, "Number of parallel workers. Specify 1 for sequential processing.")
+	flag.BoolVar(&caseSensitive, "cs", false, "Perform a case-sensitive search.")
 	flag.Parse()
 
 	if flag.NArg() < 2 {
@@ -173,6 +187,7 @@ func main() {
 
 	searcher := &fileSearcher{
 		parallelWorkers: numWorkers,
+		caseSensitive:   caseSensitive,
 	}
 
 	start := time.Now()
