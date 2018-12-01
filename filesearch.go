@@ -5,9 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"math"
 	"os"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -24,12 +22,8 @@ const (
 
 var out = colorable.NewColorableStdout()
 
-type searcher interface {
-	Search(s, expression string)
-	SearchParallel(s, expression string)
-}
-
 type fileSearcher struct {
+	parallelWorkers int
 }
 
 type lineData struct {
@@ -37,20 +31,26 @@ type lineData struct {
 	data   string
 }
 
-func (fs fileSearcher) Search(fileName, expression string) {
-	start := time.Now()
+func (fs *fileSearcher) Search(fileName, pattern string) {
 	f, err := os.Open(fileName)
 	if err != nil {
 		panic(err)
 	}
 	defer f.Close()
+	if fs.parallelWorkers <= 1 {
+		fs.SearchSequential(f, pattern)
+	} else {
+		fs.SearchParallel(f, pattern)
+	}
+}
 
+func (fs *fileSearcher) SearchSequential(f *os.File, pattern string) {
 	// Create scanner for file to process each line
 	fileScanner := bufio.NewScanner(f)
 	lineNumber := 1
 	for fileScanner.Scan() {
 		line := fileScanner.Text()
-		if parsedLine, found := fs.parseLine(line, expression); found {
+		if parsedLine, found := fs.parseLine(line, pattern); found {
 			fmt.Fprintf(out, "%s%s %s\n", fs.modifyPrintColor(fmt.Sprint(lineNumber), colorGreen), fs.modifyPrintColor(":", colorMagenta), parsedLine)
 		}
 		lineNumber++
@@ -58,87 +58,23 @@ func (fs fileSearcher) Search(fileName, expression string) {
 	if err := fileScanner.Err(); err != nil {
 		fmt.Fprintln(os.Stderr, "reading from file:", err)
 	}
-	fmt.Println(time.Since(start))
 }
 
-func (fs fileSearcher) SearchParallel(fileName, expression string) {
-	start := time.Now()
-	f, err := os.Open(fileName)
-	if err != nil {
-		panic(err)
-	}
-	defer f.Close()
-
-	l := fs.generateLines(f)
-	// pl1 := fs.searchLine(l, expression)
-	// pl2 := fs.searchLine(l, expression)
-
-	// for line := range merge(pl1, pl2) {
-	// 	fmt.Fprintf(out, "%s%s %s\n", fs.modifyPrintColor(fmt.Sprint(line.number), colorGreen), fs.modifyPrintColor(":", colorMagenta), line.data)
-	// }
+func (fs *fileSearcher) SearchParallel(f *os.File, pattern string) {
 	var wg sync.WaitGroup
 	parsedLines := make(chan lineData, 100)
-	numWorkers := int(math.Max(1.0, float64(runtime.NumCPU()-1)))
-	for i := 0; i < numWorkers; i++ {
+	l := fs.generateLines(f)
+	for i := 0; i < fs.parallelWorkers; i++ {
 		wg.Add(1)
-		fs.searchLine(l, parsedLines, &wg, expression)
+		fs.searchLine(l, parsedLines, &wg, pattern)
 	}
-	// fs.searchLine(l, parsedLines, &wg, expression)
-	// fs.searchLine(l, parsedLines, &wg, expression)
-
-	errChan := fs.outputWriter(parsedLines)
+	writeChan := fs.outputWriter(parsedLines)
 	wg.Wait()
-	close(parsedLines)
-	<-errChan //Block
-
-	// for line := range parsedLines {
-	// 	fmt.Fprintf(out, "%s%s %s\n", fs.modifyPrintColor(fmt.Sprint(line.number), colorGreen), fs.modifyPrintColor(":", colorMagenta), line.data)
-	// }
-	// close(parsedLines)
-
-	// lines := make(chan lineData, 100)
-	// parsedLines := make(chan lineData, 100)
-	// var wg sync.WaitGroup
-	// // numWorkers := int(math.Max(1.0, float64(runtime.NumCPU()-1)))
-
-	// // for i := 0; i < numWorkers; i++ {
-	// for i := 0; i < 2; i++ {
-	// 	go fs.searchLine(i, lines, parsedLines, &wg, expression)
-	// }
-
-	// go func(lines <-chan lineData, wg *sync.WaitGroup) {
-	// 	for parsed := range lines {
-	// 		fmt.Println(parsed.data)
-	// 		// fmt.Fprintf(out, "%s%s %s\n", fs.modifyPrintColor(fmt.Sprint(parsed.number), colorGreen), fs.modifyPrintColor(":", colorMagenta), parsed.data)
-	// 	}
-	// }(parsedLines, &wg)
-
-	// // Create scanner for file to process each line
-	// fileScanner := bufio.NewScanner(f)
-	// lineNumber := 1
-	// for fileScanner.Scan() {
-	// 	line := fileScanner.Text()
-	// 	ld := lineData{
-	// 		number: lineNumber,
-	// 		data:   line,
-	// 	}
-	// 	wg.Add(1)
-	// 	lines <- ld
-	// 	// if parsedLine, found := fs.parseLine(line, expression); found {
-	// 	// 	fmt.Fprintf(out, "%s%s %s\n", fs.modifyPrintColor(fmt.Sprint(lineNumber), colorGreen), fs.modifyPrintColor(":", colorMagenta), parsedLine)
-	// 	// }
-	// 	lineNumber++
-	// }
-	// if err := fileScanner.Err(); err != nil {
-	// 	fmt.Fprintln(os.Stderr, "reading from file:", err)
-	// }
-
-	// close(lines)
-	// wg.Wait()
-	fmt.Println(time.Since(start))
+	close(parsedLines) // Done parsing all lines. It is safe to close the channel
+	<-writeChan        // Block until write is done
 }
 
-func (fs fileSearcher) generateLines(f io.Reader) <-chan lineData {
+func (fs *fileSearcher) generateLines(f io.Reader) <-chan lineData {
 	lines := make(chan lineData, 100)
 	go func() {
 		// Create scanner for file to process each line
@@ -161,13 +97,10 @@ func (fs fileSearcher) generateLines(f io.Reader) <-chan lineData {
 	return lines
 }
 
-func (fs fileSearcher) searchLine(lines <-chan lineData, parsedLines chan<- lineData, wg *sync.WaitGroup, expression string) {
+func (fs *fileSearcher) searchLine(lines <-chan lineData, parsedLines chan<- lineData, wg *sync.WaitGroup, pattern string) {
 	go func() {
 		for line := range lines {
-			// fmt.Printf("worker: %d processing line: %d\n", id, line.number)
-			if parsedLine, found := fs.parseLine(line.data, expression); found {
-				// fmt.Fprintf(out, "%s%s %s\n", fs.modifyPrintColor(fmt.Sprint(line.number), colorGreen), fs.modifyPrintColor(":", colorMagenta), parsedLine)
-				// fmt.Printf("worker %d found success on line %s\n", id, parsedLine)
+			if parsedLine, found := fs.parseLine(line.data, pattern); found {
 				parsedLines <- lineData{
 					number: line.number,
 					data:   parsedLine,
@@ -178,7 +111,7 @@ func (fs fileSearcher) searchLine(lines <-chan lineData, parsedLines chan<- line
 	}()
 }
 
-func (fs fileSearcher) outputWriter(parsedLines <-chan lineData) <-chan error {
+func (fs *fileSearcher) outputWriter(parsedLines <-chan lineData) <-chan error {
 	err := make(chan error, 1)
 	go func() {
 		for line := range parsedLines {
@@ -190,51 +123,17 @@ func (fs fileSearcher) outputWriter(parsedLines <-chan lineData) <-chan error {
 	return err
 }
 
-// func (fs fileSearcher) searchLine(lines <-chan lineData, expression string) <-chan lineData {
-// 	parsedLines := make(chan lineData, 100)
-// 	go func() {
-// 		for line := range lines {
-// 			// fmt.Printf("worker: %d processing line: %d\n", id, line.number)
-// 			if parsedLine, found := fs.parseLine(line.data, expression); found {
-// 				// fmt.Fprintf(out, "%s%s %s\n", fs.modifyPrintColor(fmt.Sprint(line.number), colorGreen), fs.modifyPrintColor(":", colorMagenta), parsedLine)
-// 				// fmt.Printf("worker %d found success on line %s\n", id, parsedLine)
-// 				parsedLines <- lineData{
-// 					number: line.number,
-// 					data:   parsedLine,
-// 				}
-// 			}
-// 		}
-// 		close(parsedLines)
-// 	}()
-// 	return parsedLines
-// }
-
-// func (fs fileSearcher) searchLine(id int, lines <-chan lineData, output chan<- lineData, wg *sync.WaitGroup, expression string) {
-// 	for line := range lines {
-// 		// fmt.Printf("worker: %d processing line: %d\n", id, line.number)
-// 		if parsedLine, found := fs.parseLine(line.data, expression); found {
-// 			// fmt.Fprintf(out, "%s%s %s\n", fs.modifyPrintColor(fmt.Sprint(line.number), colorGreen), fs.modifyPrintColor(":", colorMagenta), parsedLine)
-// 			// fmt.Printf("worker %d found success on line %s\n", id, parsedLine)
-// 			output <- lineData{
-// 				number: line.number,
-// 				data:   parsedLine,
-// 			}
-// 		}
-// 		wg.Done()
-// 	}
-// }
-
-// parseLineRecursive looks recursively through a line to find every instance of the expression in the line
-func (fs fileSearcher) parseLine(s, exp string) (string, bool) {
+// parseLine looks recursively through a line to find every instance of the pattern in the line
+func (fs *fileSearcher) parseLine(s, pattern string) (string, bool) {
 	var parsedString string
-	i := strings.Index(s, exp)
+	i := strings.Index(s, pattern)
 	if i > -1 {
-		expLength := len(exp)
+		pLength := len(pattern)
 		sString := s[0:i]
-		expString := s[i : i+expLength]
-		parsedString += fmt.Sprintf("%s%s", sString, fs.modifyPrintColor(expString, colorRed))
-		if i+expLength < len(s) {
-			out, _ := fs.parseLine(s[i+expLength:], exp)
+		foundPattern := s[i : i+pLength]
+		parsedString += fmt.Sprintf("%s%s", sString, fs.modifyPrintColor(foundPattern, colorRed))
+		if i+pLength < len(s) {
+			out, _ := fs.parseLine(s[i+pLength:], pattern)
 			parsedString += out
 		}
 		return parsedString, true
@@ -242,56 +141,41 @@ func (fs fileSearcher) parseLine(s, exp string) (string, bool) {
 	return parsedString + s, false
 }
 
-func (fs fileSearcher) modifyPrintColor(s, color string) string {
+func (fs *fileSearcher) modifyPrintColor(s, color string) string {
 	return fmt.Sprintf("%s%s%s", color, s, colorNormal)
 }
 
 func main() {
-	var fileName string
-	var filePath string
-	var searchString string
-	flag.StringVar(&searchString, "s", "", "-s hello world")
-	flag.StringVar(&fileName, "f", "", "-f temp.go")
-	flag.StringVar(&filePath, "fp", "./", "-fp ./temp/")
-	flag.Parse()
-
-	if searchString == "" || fileName == "" {
-		panic("whoops") // TODO: Fix
+	flag.Usage = func() {
+		fmt.Printf("%s by Zachary Madigan\n", os.Args[0])
+		fmt.Println("Usage:")
+		fmt.Printf("\tgogrep [flags] pattern file\n")
+		fmt.Println("Flags:")
+		flag.PrintDefaults()
 	}
 
-	searcher := fileSearcher{}
-	// search(searcher, fileName, searchString)
-	searcher.SearchParallel(fileName, searchString)
+	var numWorkers int
+	flag.IntVar(&numWorkers, "p", 4, "Number of parallel workers. Specify 1 for sequential processing.")
+	flag.Parse()
+
+	if flag.NArg() < 2 {
+		flag.Usage()
+		os.Exit(1)
+	}
+
+	pattern := flag.Arg(0)
+	fileName := flag.Arg(1)
+
+	if _, err := os.Stat(fileName); err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+
+	searcher := &fileSearcher{
+		parallelWorkers: numWorkers,
+	}
+
+	start := time.Now()
+	searcher.Search(fileName, pattern)
+	fmt.Println(time.Since(start))
 }
-
-func search(searcher searcher, fileName, expression string) {
-	searcher.Search(fileName, expression)
-}
-
-// https://blog.golang.org/pipelines
-// merges multiple channels into 1
-// func merge(cs ...<-chan lineData) <-chan lineData {
-// 	var wg sync.WaitGroup
-// 	out := make(chan lineData)
-
-// 	// Start an output goroutine for each input channel in cs.  output
-// 	// copies values from c to out until c is closed, then calls wg.Done.
-// 	output := func(c <-chan lineData) {
-// 		for n := range c {
-// 			out <- n
-// 		}
-// 		wg.Done()
-// 	}
-// 	wg.Add(len(cs))
-// 	for _, c := range cs {
-// 		go output(c)
-// 	}
-
-// 	// Start a goroutine to close out once all the output goroutines are
-// 	// done.  This must start after the wg.Add call.
-// 	go func() {
-// 		wg.Wait()
-// 		close(out)
-// 	}()
-// 	return out
-// }
