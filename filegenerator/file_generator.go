@@ -19,7 +19,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	for i := 0; i < 500000; i++ {
+	for i := 1; i <= 500000; i++ {
 		f.WriteString("This is a longer line. This is a longer line. This is a longer line. This is a longer line. This is a longer line. This is a longer line. This is a longer line. This is a longer line. This is a longer line. This is a longer line. This is a longer line. This is a longer line. This is a longer line. This is a longer line. This is a longer line. This is a longer line.This is a longer line.This is a longer line.\n")
 	}
 	f.Close()
@@ -28,7 +28,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	for i := 0; i < 500000; i++ {
+	for i := 1; i <= 500000; i++ {
 		if i != 123456 {
 			f.WriteString("[INFO] This is an example log info statement.\n")
 		} else {
