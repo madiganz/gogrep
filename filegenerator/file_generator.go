@@ -1,39 +1,43 @@
 package main
 
 import (
-	"fmt"
 	"os"
+	"path/filepath"
 )
 
+const (
+	smLine = "test\n"
+	mdLine = "this is a test this is a test this is a test this is a test this is a test this is a test this is a test this is a test this is a test this is a test\n"
+	lgLine = "this is a test this is a test this is a test this is a test this is a test this is a test this is a test this is a test this is a test this is a test this is a test this is a test this is a test this is a test this is a test this is a test this is a test this is a test this is a test this is a test\n"
+)
+
+func generateFile(fileName string, numOfLines int, lineData string) {
+	f, err := os.Create(filepath.Join("./test/", fileName))
+	if err != nil {
+		panic(err)
+	}
+	for i := 1; i <= numOfLines; i++ {
+		f.WriteString(lineData)
+	}
+	f.Close()
+}
+
 func main() {
-	f, err := os.Create("large_test_file.txt")
-	if err != nil {
-		panic(err)
-	}
-	for i := 1; i <= 10000000; i++ {
-		f.WriteString(fmt.Sprintf("%s %d %s\n", "this is a test ", i, " this is a test"))
-	}
-	f.Close()
+	os.MkdirAll("./test", os.ModePerm)
 
-	f, err = os.Create("test_longer_lines.txt")
-	if err != nil {
-		panic(err)
-	}
-	for i := 1; i <= 500000; i++ {
-		f.WriteString("This is a longer line. This is a longer line. This is a longer line. This is a longer line. This is a longer line. This is a longer line. This is a longer line. This is a longer line. This is a longer line. This is a longer line. This is a longer line. This is a longer line. This is a longer line. This is a longer line. This is a longer line. This is a longer line.This is a longer line.This is a longer line.\n")
-	}
-	f.Close()
+	generateFile("sm_sm.txt", 100, smLine)
+	generateFile("sm_md.txt", 100, mdLine)
+	generateFile("sm_lg.txt", 100, lgLine)
 
-	f, err = os.Create("test_error_appears_once.txt")
-	if err != nil {
-		panic(err)
-	}
-	for i := 1; i <= 500000; i++ {
-		if i != 123456 {
-			f.WriteString("[INFO] This is an example log info statement.\n")
-		} else {
-			f.WriteString("[ERROR] Houston we have a problem!\n")
-		}
-	}
-	f.Close()
+	generateFile("md_sm.txt", 10000, smLine)
+	generateFile("md_md.txt", 10000, mdLine)
+	generateFile("md_lg.txt", 10000, lgLine)
+
+	generateFile("lg_sm.txt", 2000000, smLine)
+	generateFile("lg_md.txt", 2000000, mdLine)
+	generateFile("lg_lg.txt", 2000000, lgLine)
+
+	generateFile("xl_sm.txt", 10000000, smLine)
+	generateFile("xl_md.txt", 10000000, mdLine)
+	generateFile("xl_lg.txt", 10000000, lgLine)
 }
