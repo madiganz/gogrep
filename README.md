@@ -1,5 +1,5 @@
 # gogrep
-File searcher that can be run in parallel. Optimized for large files.
+File searcher that has a sequential or parallel processing option. Optimized for large files.
 
 ## Get source code
 go get -u github.com/madiganz/gogrep
