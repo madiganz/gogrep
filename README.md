@@ -1,7 +1,7 @@
 # gogrep
 File searcher that has a sequential or parallel processing option. Optimized for large files.
 
-## Get source code
+## Get source code and dependecies
 go get -u github.com/madiganz/gogrep
 
 ## Build on Windows
@@ -27,6 +27,6 @@ From inside ./gogrep/ - go build -o filegenerator.exe .\filegenerator
 To run - ./filegenerator.exe
 
 #### On Linux
-Follow similar pattern as for gogrep.exe
+Follow similar pattern as for ./gogrep
 
 This will create multiple files in a ./test directory that can be used to test the performance of the file searcher.
