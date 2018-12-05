@@ -18,3 +18,15 @@ go get -u github.com/madiganz/gogrep
 - -cs - Perform case-sensitive search. Default is false.
 - -p - Number of parallel workers to use. Default is 4. Specify 1 for sequential processing.
 - -v - Output all lines that match the search pattern
+
+## Testing
+### Build and Run
+#### On Windows
+From inside ./gogrep/ - go build -o filegenerator.exe .\filegenerator
+
+To run - ./filegenerator.exe
+
+#### On Linux
+Follow similar pattern as for gogrep.exe
+
+This will create multiple files in a ./test directory that can be used to test the performance of the file searcher.
